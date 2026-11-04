@@ -1,0 +1,182 @@
+"""One entry point for everything.
+
+    python -m leptowatch.pipeline prepare       parse + audit + case panel + env table + features
+    python -m leptowatch.pipeline offline       backtest -> blend -> report (tunes alert thresholds)
+    python -m leptowatch.pipeline train-final   fit the final models on all data, freeze them
+    python -m leptowatch.pipeline weekly        the Monday run: fetch, forecast, alert, ledger, bulletin
+    python -m leptowatch.pipeline weekly --offline   same, without Earth Engine/web (uses data on disk)
+
+Each step writes files under data/ so any step can be re-run alone.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import pickle
+import subprocess
+import sys
+
+import numpy as np
+import pandas as pd
+
+from leptowatch import __version__, io
+from leptowatch.config import load_config, path
+
+
+def _run(mod, *args):
+    print(f'\n=== {mod} {" ".join(args)}')
+    subprocess.run([sys.executable, '-m', mod, *args], check=True)
+
+
+def prepare():
+    interim = str(path('interim', 'x').parent)
+    _run('leptowatch.data.wer_parse', str(path('raw', 'wer_pdfs', 'x').parent), interim)
+    _run('leptowatch.data.wer_audit', interim)
+    _run('leptowatch.data.cases', interim, str(path('processed', 'cases_weekly.csv')))
+    if list(path('raw', 'ee', 'x').parent.glob('lw_*.csv')):
+        _run('leptowatch.data.env')
+    else:
+        print('No Earth Engine exports yet: features will use case data only.')
+    _run('leptowatch.features.build')
+
+
+def offline(models=('B0', 'B1', 'B2', 'A', 'B')):
+    _run('leptowatch.eval.backtest', '--models', *models)
+    _run('leptowatch.models.blend')
+    _run('leptowatch.eval.report')
+
+
+def train_final():
+    """Fit A and B on every row whose outcome is known, plus the stackers and the conformal width."""
+    from leptowatch.models import detectors as D
+    from leptowatch.models.blend import Stacker
+    from leptowatch.models.common import qcol
+    cfg = load_config()
+    df = io.load(path('processed', 'features.parquet'))
+    tp = path('models', 'tuned_params.json')
+    tuned = json.loads(tp.read_text()) if tp.exists() else {}
+    L = cfg['forecast']['case_lag_weeks']
+    t_now = int(df.t.max())
+    train = df[(df.t + 5 <= t_now - L) & df.y35.notna()]
+    A = D.DetectorA(**tuned.get('A', {})).fit(train)
+    B = D.DetectorB(params=tuned.get('B')).fit(train)
+    bl = io.load(path('processed', 'oof_blend.parquet'))
+    oa, ob = io.load(path('processed', 'oof_A.parquet')), io.load(path('processed', 'oof_B.parquet'))
+    m = oa.merge(ob, on=['t', 'rdhs'], suffixes=('_A', '_B'))
+    cy = cfg['models'].get('calibration_years')
+    if cy:                                              # same recent window as the backtest blend
+        m = m[m.year_A >= m.year_A.max() - cy]
+        bl = bl[bl.year >= bl.year.max() - cy]
+    stack = {}
+    for lab, col in (('surgeE', 'pE'), ('surgeH', 'pH')):
+        k = m[f'{lab}_A'].notna() & m[f'{col}_A'].notna() & m[f'{col}_B'].notna()
+        stack[col] = Stacker().fit(m.loc[k, f'{col}_A'].values, m.loc[k, f'{col}_B'].values, m.loc[k, f'{lab}_A'].values)
+    level = cfg['models']['interval_level']
+    lo, hi = qcol(round((1 - level) / 2, 4)), qcol(round(1 - (1 - level) / 2, 4))
+    k = bl.y35.notna()
+    s = np.maximum(bl.loc[k, lo] - bl.loc[k, 'y35'], bl.loc[k, 'y35'] - bl.loc[k, hi])
+    Q = float(np.quantile(s, min(1, level * (1 + 1 / len(s)))))
+    bundle = {'A': A, 'B': B, 'stack': stack, 'cqr_Q': Q, 'trained_through_t': int(train.t.max()),
+              'version': __version__, 'trained_at': dt.datetime.now().isoformat(timespec='seconds')}
+    with open(path('models', 'final_bundle.pkl'), 'wb') as fh:
+        pickle.dump(bundle, fh)
+    print(f'final models saved; trained on {len(train):,} rows; conformal width Q = {Q:.2f}')
+
+
+def forecast_latest(df, bundle, issue_t=None):
+    from leptowatch.models.common import qcol, quantile_levels
+    issue_t = int(df.t.max()) if issue_t is None else issue_t
+    rows = df[df.t == issue_t].copy()
+    pa, pb = bundle['A'].predict(rows), bundle['B'].predict(rows)
+    out = rows[['t', 'rdhs', 'issue_start', 'thrE35', 'thrH35', 'nowcast_last3', 'thrE_now']].copy()
+    out['mu'] = 0.5 * (pa.mu + pb.mu)
+    for q in quantile_levels():
+        out[qcol(q)] = 0.5 * (pa[qcol(q)] + pb[qcol(q)])
+    level = load_config()['models']['interval_level']
+    lo, hi = qcol(round((1 - level) / 2, 4)), qcol(round(1 - (1 - level) / 2, 4))
+    out['lo'] = (out[lo] - bundle['cqr_Q']).clip(lower=0)
+    out['hi'] = out[hi] + bundle['cqr_Q']
+    for col in ('pE', 'pH'):
+        ok = pa[col].notna() & pb[col].notna()
+        out[col] = np.nan
+        out.loc[ok, col] = bundle['stack'][col].predict(pa.loc[ok, col].values, pb.loc[ok, col].values)
+    try:
+        contrib = bundle['B'].shap(rows, 'surgeE')
+        from leptowatch.eval.explain import reasons
+        out['reasons'] = [' | '.join(r) for r in reasons(contrib, rows)]
+    except Exception as e:  # noqa: BLE001
+        out['reasons'] = f'(explanations unavailable: {e})'
+    return out
+
+
+def weekly(offline_mode=False):
+    from leptowatch.alerts import engine, ledger, watchdog
+    from leptowatch.models import detectors as D
+    today = dt.date.today()
+    if not offline_mode:
+        _run('leptowatch.data.wer_download', 'update')
+        try:
+            from leptowatch.data import gee
+            gee.init()
+            for kind in ('rain', 'soil'):
+                d = gee.recent_daily(kind, 70)
+                d.rename(columns={'value': 'mean'}).to_csv(path('raw', 'ee', f'lw_{kind}_live.csv'), index=False)
+            gee.recent_flood(40).to_csv(path('raw', 'ee', 'lw_flood_live.csv'), index=False)
+        except Exception as e:  # noqa: BLE001
+            print('WARNING: Earth Engine update failed -> affected areas will show Unverified:', e)
+    prepare()
+    df = io.load(path('processed', 'features.parquet'))
+    with open(path('models', 'final_bundle.pkl'), 'rb') as fh:
+        bundle = pickle.load(fh)
+    fc = forecast_latest(df, bundle)
+    rules = pd.concat([D.DetectorC().predict(df[df.t == fc.t.iloc[0]]).add_prefix('C_'),
+                       D.DetectorD().predict(df[df.t == fc.t.iloc[0]]).add_prefix('D_')], axis=1)
+    fc = fc.join(rules)
+    # watchdog: newest observation date per source and area
+    cases = io.load(path('processed', 'cases_weekly.csv'))
+    latest = {'cases': cases[cases.cases.notna()].groupby('rdhs').week_start.max().add(pd.Timedelta(days=6))
+              .rename('date').reset_index()}
+    envp = path('processed', 'env_weekly.csv')
+    if envp.exists():
+        env = io.load(envp)
+        for src, col in (('rain', 'rain_mm'), ('soil', 'soil_m3m3')):
+            if col in env:
+                latest[src] = env[env[col].notna()].groupby('rdhs').week_start.max().add(pd.Timedelta(days=6)).rename('date').reset_index()
+        if 'radar_last_pass' in env:
+            latest['radar'] = env.dropna(subset=['radar_last_pass']).groupby('rdhs').radar_last_pass.max().rename('date').reset_index()
+    wd = watchdog.check_inputs(latest, today)
+    fc = fc.merge(wd, on='rdhs', how='left')
+    th = engine.load_thresholds()
+    fc = engine.apply_rules(fc, th, data_ok_col='data_ok')
+    issue = str(fc.issue_start.iloc[0].date())
+    keep = ['rdhs', 'issue_start', 'tier', 'rule', 'unverified', 'pE', 'pH', 'mu', 'lo', 'hi', 'thrE35', 'thrH35',
+            'reasons', 'failures', 'cases_age_days', 'rain_age_days', 'soil_age_days', 'radar_age_days', 'C_fire', 'D_fire']
+    pub = fc[[c for c in keep if c in fc]].copy()
+    h = ledger.append(issue, pub, bundle['version'])
+    pub['ledger_hash'] = h
+    io.save(pub, path('outputs', 'forecast_latest.csv'))
+    path('outputs', 'forecast_latest.json').write_text(pub.to_json(orient='records', date_format='iso', indent=1))
+    hist = path('outputs', 'forecast_history.csv')
+    pub.to_csv(hist, mode='a', header=not hist.exists(), index=False)
+    print(pub[['rdhs', 'tier', 'pE', 'mu', 'lo', 'hi']].to_string(index=False))
+    try:
+        from leptowatch.alerts import bulletin, notify
+        pdf = bulletin.make(pub, issue)
+        notify.send_week(pub, issue, pdf)
+    except Exception as e:  # noqa: BLE001
+        print('bulletin/notify skipped:', e)
+    print(f'Weekly run done for issue week starting {issue}; ledger hash {h[:12]}')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('cmd', choices=['prepare', 'offline', 'train-final', 'weekly'])
+    ap.add_argument('--offline', action='store_true')
+    a = ap.parse_args()
+    {'prepare': prepare, 'offline': offline, 'train-final': train_final,
+     'weekly': lambda: weekly(a.offline)}[a.cmd]()
+
+
+if __name__ == '__main__':
+    main()

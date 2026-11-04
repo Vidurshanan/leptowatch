@@ -1,0 +1,77 @@
+"""Sri Lankan epidemiological week calendar used by the Weekly Epidemiological Report.
+
+Verified against the report tables:
+  * up to 2025: weeks run Saturday-Friday; week 1 is the Saturday-Friday week that contains 2 January
+    (2025 week 1 = 28 Dec 2024 - 3 Jan 2025; 2010 week 1 = 2-8 Jan 2010; 2009 week 1 = 27 Dec 2008 -
+    2 Jan 2009). Checked against the dates printed in the table titles of the archived reports.
+  * from 2026: weeks run Monday-Sunday and follow ISO numbering
+    (2026 week 1 = 29 Dec 2025 - 4 Jan 2026; week 23 = 1-7 June 2026).
+The two days 27-28 Dec 2025 fall between the two systems; they belong to no reporting week.
+
+Every week is identified by its START DATE, so joins never depend on week numbers.
+"""
+from __future__ import annotations
+
+import datetime as dt
+
+import pandas as pd
+
+MONDAY_FROM = 2026
+
+
+def _sat_week1(year: int) -> dt.date:
+    jan2 = dt.date(year, 1, 2)
+    return jan2 - dt.timedelta(days=(jan2.weekday() - 5) % 7)   # Saturday on/before 2 Jan
+
+
+def week_start(year: int, week: int) -> dt.date:
+    if year >= MONDAY_FROM:
+        return dt.date.fromisocalendar(year, week, 1)
+    return _sat_week1(year) + dt.timedelta(weeks=week - 1)
+
+
+def week_end(year: int, week: int) -> dt.date:
+    return week_start(year, week) + dt.timedelta(days=6)
+
+
+def weeks_in_year(year: int) -> int:
+    if year >= MONDAY_FROM:
+        return dt.date(year, 12, 28).isocalendar()[1]
+    nxt = dt.date.fromisocalendar(year + 1, 1, 1) - dt.timedelta(days=2) if year + 1 >= MONDAY_FROM \
+        else _sat_week1(year + 1)
+    return (nxt - _sat_week1(year)).days // 7
+
+
+def week_of(d: dt.date) -> tuple[int, int] | None:
+    """(year, week) of a date, or None for the 27-28 Dec 2025 gap."""
+    if isinstance(d, pd.Timestamp):
+        d = d.date()
+    if d >= dt.date.fromisocalendar(MONDAY_FROM, 1, 1):
+        y, w, _ = d.isocalendar()
+        return y, w
+    for y in (d.year + 1, d.year, d.year - 1):
+        if y >= MONDAY_FROM:
+            continue
+        s = _sat_week1(y)
+        n = weeks_in_year(y)
+        if s <= d < s + dt.timedelta(weeks=n):
+            return y, (d - s).days // 7 + 1
+    return None
+
+
+def weeks_table(first_year: int = 2007, last_date: dt.date | None = None) -> pd.DataFrame:
+    """One row per reporting week: year, week, start, end, t (global consecutive index)."""
+    last_date = last_date or dt.date.today()
+    rows = []
+    y = first_year
+    while True:
+        for w in range(1, weeks_in_year(y) + 1):
+            s = week_start(y, w)
+            if s > last_date:
+                df = pd.DataFrame(rows, columns=["year", "week", "start", "end"])
+                df["start"] = pd.to_datetime(df.start)
+                df["end"] = pd.to_datetime(df.end)
+                df["t"] = range(len(df))
+                return df
+            rows.append((y, w, s, s + dt.timedelta(days=6)))
+        y += 1
