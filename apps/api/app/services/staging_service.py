@@ -8,7 +8,14 @@ from app.schemas.common import PredictionInterval, QuantileForecast, FreshnessIn
 from app.schemas.health import HealthResponse
 from app.schemas.summary import DashboardSummaryResponse
 from app.schemas.rdhs import RDHSSummaryItem, RDHSDetailResponse, RDHSListResponse
-from app.schemas.forecast import ForecastRecord, ForecastListResponse, ForecastDetailResponse
+from app.schemas.forecast import (
+    ForecastRecord,
+    ForecastListResponse,
+    ForecastDetailResponse,
+    HistoricalValidationRecord,
+    HistoricalValidationSummary,
+    HistoricalValidationResponse,
+)
 from app.schemas.alert import AlertRecord, AlertListResponse
 from app.schemas.environment import EnvironmentDetailResponse, RainfallSeriesItem, SoilMoistureSeriesItem
 from app.schemas.history import HistoryRecord, HistoryResponse, HistorySummary
@@ -325,6 +332,84 @@ class StagingService:
             cases_age_days=age_days,
             freshness_policy_limit=56,
             reasons=str(row["reasons"]) if pd.notna(row.get("reasons")) else None,
+        )
+
+    def get_historical_validation(
+        self, rdhs_id: Optional[str] = "Kurunegala", year: int = 2024, limit: int = 52
+    ) -> HistoricalValidationResponse:
+        """Serve pre-2025 out-of-fold benchmark validation records with actual y35 target."""
+        target_rdhs = rdhs_id.strip() if (rdhs_id and rdhs_id.strip()) else "Kurunegala"
+        oof_df = data_loader.historical_oof
+        if oof_df is None or oof_df.empty:
+            return HistoricalValidationResponse(
+                rdhs=target_rdhs,
+                summary=HistoricalValidationSummary(sample_count=0),
+                records=[],
+            )
+
+        match = oof_df[oof_df["rdhs"].astype(str).str.casefold() == target_rdhs.casefold()]
+        if match.empty:
+            match = oof_df[oof_df["rdhs"] == "Kurunegala"]
+            target_rdhs = "Kurunegala"
+
+        if year:
+            filtered = match[match["year"] == year].copy()
+            if filtered.empty:
+                filtered = match[match["year"] == 2024].copy()
+        else:
+            filtered = match.copy()
+
+        # Merge actual y35 target from features (t+3 through t+5 actual cases)
+        feat_df = data_loader.features
+        if feat_df is not None and not feat_df.empty and "y35" in feat_df.columns:
+            feat_subset = feat_df[["rdhs", "t", "y35"]].copy()
+            merged = pd.merge(filtered, feat_subset, on=["rdhs", "t"], how="left")
+        else:
+            merged = filtered.copy()
+            merged["y35"] = None
+
+        merged = merged.sort_values("t").tail(limit)
+
+        records: List[HistoricalValidationRecord] = []
+        errors_abs: List[float] = []
+        errors_sq: List[float] = []
+
+        for _, row in merged.iterrows():
+            pred = sanitize_float(row.get("mu"))
+            act = sanitize_float(row.get("y35"))
+            if pred is not None and act is not None:
+                err = abs(pred - act)
+                errors_abs.append(err)
+                errors_sq.append(err ** 2)
+
+            records.append(
+                HistoricalValidationRecord(
+                    t=int(row["t"]),
+                    issue_start=str(row.get("issue_start", ""))[:10],
+                    target_period="t+3..t+5",
+                    predicted_mu=pred,
+                    actual_y35=act,
+                    lo=sanitize_float(row.get("lo")),
+                    hi=sanitize_float(row.get("hi")),
+                    pE=sanitize_float(row.get("pE")),
+                    pH=sanitize_float(row.get("pH")),
+                )
+            )
+
+        mae = float(sum(errors_abs) / len(errors_abs)) if errors_abs else None
+        rmse = float((sum(errors_sq) / len(errors_sq)) ** 0.5) if errors_sq else None
+
+        summary = HistoricalValidationSummary(
+            sample_count=len(records),
+            mae=round(mae, 2) if mae is not None else None,
+            rmse=round(rmse, 2) if rmse is not None else None,
+            evaluated_year=year if year else 2024,
+        )
+
+        return HistoricalValidationResponse(
+            rdhs=target_rdhs,
+            summary=summary,
+            records=records,
         )
 
     def get_alerts_latest(self) -> AlertListResponse:

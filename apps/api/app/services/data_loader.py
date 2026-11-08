@@ -178,6 +178,7 @@ class DataLoader:
         self._df_rain_2023: Optional[pd.DataFrame] = None
         self._df_soil_2023: Optional[pd.DataFrame] = None
         self._df_flood: Optional[pd.DataFrame] = None
+        self._df_historical_oof: Optional[pd.DataFrame] = None
         self.loading_errors: List[str] = []
         self._is_loaded = False
 
@@ -275,6 +276,13 @@ class DataLoader:
             except Exception as e:
                 self.loading_errors.append(f"Flood series load error: {e}")
 
+        # 7. Historical OOF Pre-2025 Validation
+        if settings.historical_oof_path.exists():
+            try:
+                self._df_historical_oof = pd.read_csv(settings.historical_oof_path)
+            except Exception as e:
+                self.loading_errors.append(f"Historical OOF load error: {e}")
+
         self._is_loaded = True
 
     def get_readiness_status(self) -> str:
@@ -344,6 +352,12 @@ class DataLoader:
         if not self._is_loaded:
             self.load_all()
         return self._df_flood
+
+    @property
+    def historical_oof(self) -> Optional[pd.DataFrame]:
+        if not self._is_loaded:
+            self.load_all()
+        return self._df_historical_oof
 
 
 data_loader = DataLoader()

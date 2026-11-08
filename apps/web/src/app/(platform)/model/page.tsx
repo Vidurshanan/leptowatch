@@ -2,11 +2,9 @@
 
 import { useEffect, useState } from "react";
 import {
-  Award,
-  BarChart3,
   Cpu,
   Lock,
-  ShieldAlert,
+  FileCheck,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +23,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  ChartCard,
+  ModelComparisonChart,
+} from "@/components/charts";
 import {
   fetchModelPerformance,
   ModelMetric,
@@ -69,25 +71,25 @@ export default function ModelPerformancePage() {
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="rounded-md border border-cyan/30 bg-surface-raised p-4">
+      <div className="rounded-md border border-cyan/30 bg-surface-raised p-4 shadow-[var(--shadow-panel)]">
         <div className="flex items-start gap-3">
           <Cpu className="mt-0.5 h-5 w-5 shrink-0 text-cyan" />
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-semibold text-foreground">
-                Model Architecture &amp; Empirical Validation
+                Model Architecture &amp; Empirical Validation Scorecard
               </h1>
               <Badge variant="unverified">Experimental Staging</Badge>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Historical out-of-fold cross-validation reliability scorecard across candidate models and primary ensemble.
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              Historical out-of-fold (OOF) cross-validation reliability scorecard across candidate models (B0, B1, B2, Detector A, Detector B) and primary ensemble blend.
             </p>
           </div>
         </div>
       </div>
 
       {/* Locked Test Holdout Banner */}
-      <div className="rounded-md border border-amber/40 bg-surface-raised p-4">
+      <div className="rounded-md border border-amber/40 bg-surface-raised p-4 shadow-[var(--shadow-panel)]">
         <div className="flex items-start gap-3">
           <Lock className="mt-0.5 h-5 w-5 shrink-0 text-amber" />
           <div className="space-y-1 text-xs leading-relaxed">
@@ -106,7 +108,7 @@ export default function ModelPerformancePage() {
               <strong className="text-foreground">Scope:</strong>{" "}
               {data?.evaluation_scope ||
                 "Historical Out-of-Fold (OOF) cross-validation on pre-2025 training panel."}
-              {" "}All metrics below reflect cross-validated performance prior to the 2025 boundary. The held-out operational test partition remains strictly unaccessed.
+              {" "}All metrics reflect cross-validated performance prior to the 2025 boundary. The held-out operational test partition remains strictly unaccessed.
             </p>
           </div>
         </div>
@@ -114,10 +116,10 @@ export default function ModelPerformancePage() {
 
       {/* Overview Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
-              Primary Model
+              Primary Ensemble Model
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -136,7 +138,7 @@ export default function ModelPerformancePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
               OOF Validation Samples
@@ -152,26 +154,26 @@ export default function ModelPerformancePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
               Operational Approval
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold text-danger">
+            <div className="text-xl font-bold font-mono text-rose-500">
               {data?.operational_approval ? "TRUE" : "FALSE"}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground font-mono">
               {data?.model_status || "EXPERIMENTAL_STAGING_NOT_PRODUCTION_APPROVED"}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
-              R² Provenance
+              R² Metric Reporting
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -183,8 +185,23 @@ export default function ModelPerformancePage() {
         </Card>
       </div>
 
+      {/* Primary Visualization: Model Comparison Chart */}
+      <ChartCard
+        title="Candidate Model Error Comparison (OOF Cross-Validation)"
+        subtitle="Empirical comparison of Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) across candidate baselines and ensemble blend."
+        badge={<Badge variant="staging">OOF Benchmark</Badge>}
+        footnote="Models ranked by validation loss. Blend achieves lowest overall MAE across historical out-of-fold evaluations."
+        isLoading={isLoading}
+        error={error}
+        isEmpty={!data?.models || data.models.length === 0}
+      >
+        {data?.models && (
+          <ModelComparisonChart models={data.models} height={290} />
+        )}
+      </ChartCard>
+
       {/* Scorecard Table */}
-      <Card>
+      <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
         <CardHeader className="border-b border-border pb-3">
           <CardTitle className="text-base font-semibold">
             Out-of-Fold Model Performance Reliability Scorecard
@@ -199,8 +216,8 @@ export default function ModelPerformancePage() {
               Loading model performance scorecard...
             </div>
           ) : error ? (
-            <div className="py-8 text-center text-sm text-danger">{error}</div>
-          ) : data && data.models && data.models.length > 0 ? (
+            <div className="py-8 text-center text-sm text-rose-400">{error}</div>
+          ) : data && data.models ? (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -208,28 +225,20 @@ export default function ModelPerformancePage() {
                     <TableHead>Rank</TableHead>
                     <TableHead>Model Name</TableHead>
                     <TableHead>Code</TableHead>
-                    <TableHead className="text-right">Samples (n)</TableHead>
                     <TableHead className="text-right">MAE</TableHead>
                     <TableHead className="text-right">RMSE</TableHead>
+                    <TableHead className="text-right">R²</TableHead>
                     <TableHead className="text-right">WAPE</TableHead>
                     <TableHead className="text-right">Bias</TableHead>
-                    <TableHead className="text-center">R² Status</TableHead>
+                    <TableHead className="text-right">Samples</TableHead>
+                    <TableHead>Source Dataset</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.models.map((m: ModelMetric) => (
-                    <TableRow
-                      key={m.code}
-                      className={m.rank === 1 ? "bg-cyan/5" : undefined}
-                    >
-                      <TableCell className="font-mono text-xs">
-                        {m.rank === 1 ? (
-                          <span className="flex items-center gap-1 font-bold text-cyan-bright">
-                            <Award className="h-3.5 w-3.5 text-cyan" /> #{m.rank}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">#{m.rank}</span>
-                        )}
+                    <TableRow key={m.model_name} className="hover:bg-surface-raised/60">
+                      <TableCell className="font-mono text-xs font-bold text-cyan">
+                        #{m.rank}
                       </TableCell>
                       <TableCell className="font-medium text-foreground">
                         {m.model_name}
@@ -237,84 +246,58 @@ export default function ModelPerformancePage() {
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {m.code}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                        {typeof m.n_samples === "number" ? m.n_samples.toLocaleString() : "--"}
+                      <TableCell className="text-right font-mono font-bold text-cyan-bright">
+                        {m.mae.toFixed(2)}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-semibold text-foreground">
-                        {typeof m.mae === "number" ? m.mae.toFixed(3) : "--"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-semibold text-foreground">
-                        {typeof m.rmse === "number" ? m.rmse.toFixed(3) : "--"}
+                      <TableCell className="text-right font-mono text-amber-400">
+                        {m.rmse.toFixed(2)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                        {m.wape !== null && m.wape !== undefined ? `${(m.wape * 100).toFixed(1)}%` : "--"}
+                        {m.r2 !== null && m.r2 !== undefined
+                          ? m.r2.toFixed(3)
+                          : <span className="text-slate-500 italic">Not Reported</span>}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                        {m.bias !== null && m.bias !== undefined ? m.bias.toFixed(3) : "--"}
+                        {m.wape !== null && m.wape !== undefined
+                          ? `${(m.wape * 100).toFixed(1)}%`
+                          : "--"}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="muted" className="text-[10px]">
-                          {m.r2 !== null && m.r2 !== undefined
-                            ? m.r2.toFixed(3)
-                            : m.r2_status || "Not reported in scorecard"}
-                        </Badge>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                        {m.bias !== null && m.bias !== undefined
+                          ? m.bias.toFixed(2)
+                          : "--"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                        {m.n_samples.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {m.source_dataset}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-          ) : (
-            <div className="py-8 text-center text-xs text-muted-foreground">
-              No model scorecard records available in staging repository.
-            </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
-      {/* Model Calibration & Architecture Methodology Cards */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
+      {/* Model Calibration Summary Card */}
+      {data?.calibration_summary && (
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
+          <CardHeader className="border-b border-border pb-3">
             <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-cyan" />
+              <FileCheck className="size-4 text-cyan" />
               <CardTitle className="text-sm font-semibold">
-                Probability Calibration Diagnostics
+                Calibration &amp; Reliability Protocol
               </CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground space-y-2 leading-relaxed">
-            <p>
-              <strong className="text-foreground">Calibration Report Summary:</strong>{" "}
-              {data?.calibration_summary ||
-                "Calibration summary unavailable in staging record."}
-            </p>
-            <p>
-              Probability predictions (pE, pH) reflect empirical thresholds from staging validation folds.
-              Because empirical disease surges exhibit heavy-tailed distributions, conservative decision bounds are evaluated.
-            </p>
+          <CardContent className="pt-3 text-xs leading-relaxed text-muted-foreground">
+            <p>{data.calibration_summary}</p>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-amber" />
-              <CardTitle className="text-sm font-semibold">
-                Model Governance &amp; Test Isolation
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground space-y-2 leading-relaxed">
-            <p>
-              <strong className="text-foreground">Holdout Isolation Safeguard:</strong> The locked holdout dataset spanning 2025 onwards remains completely untouched during all exploratory and development iterations.
-            </p>
-            <p>
-              Automated pipelines reject any code paths that attempt evaluation against or model parameter optimization on dates on or after 2025-01-01.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      )}
     </div>
   );
 }

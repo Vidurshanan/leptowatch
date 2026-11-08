@@ -1,0 +1,16 @@
+{
+  "project": "LeptoWatch",
+  "artifact_type": "STAGING_DEMONSTRATION",
+  "dataset": "/content/leptowatch_drive38/MyDrive/LeptoWatch/data/staging/notebook_38_demo_data/dashboard_forecast_staging.parquet",
+  "source_issue_start": "2026-11-02",
+  "rdhs_count": 26,
+  "status": "NOT_APPROVED_FOR_OPERATIONAL_PUBLIC_HEALTH_USE",
+  "interpretation": "Displayed outputs are experimental staging results. Watch-Unverified means data freshness or verification requirements were not satisfied; it is not evidence of elevated disease activity.",
+  "known_limitations": [
+    "Accepted case data freshness gate may block operational use.",
+    "Staging inference does not establish current-period predictive validity.",
+    "Environmental predictor issue-time availability has not been verified.",
+    "Alert thresholds are not production-approved.",
+    "The locked test has not been evaluated."
+  ]
+}

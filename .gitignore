@@ -1,6 +1,6 @@
 # ==========================================
-# LeptoWatch — Git Ignore Rules
-# Strictly prevents data, secrets & build artifacts
+# LeptoWatch -- Git Ignore Rules
+# Strictly prevents secrets, build artifacts, and non-approved data.
 # ==========================================
 
 # Secrets and environment files
@@ -33,30 +33,95 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 
-# Large Data & Binary Files (Strictly Excluded)
-data/
-*.parquet
-*.parquet.*
+# ==========================================================================
+# Data directory strategy:
+# We DO NOT blanket-ignore data/ because git cannot un-ignore files inside
+# an ignored directory. Instead we ignore specific unsafe subtrees and
+# file types, then explicitly allow required demonstration files.
+# ==========================================================================
+
+# Ignore entire subtrees that must NEVER be committed:
+data/raw/
+data/interim/
+data/models/
+data/outputs/
+data/notebooks/
+data/private/
+data/locked_test/
+data/wer_pdfs/
+
+# Ignore ALL pickle/joblib/binary model artifacts anywhere under data/
+data/**/*.pkl
+data/**/*.joblib
+data/**/*.bin
+data/**/*.h5
+data/**/*.pt
+data/**/*.onnx
+
+# Ignore any .env-style files that may appear under data/
+data/**/.env
+data/**/.env.*
+
+# Ignore development notebooks inside data/
+data/**/*.ipynb
+
+# Ignore any private handover ZIPs that may land in data/
+data/**/*.zip
+data/**/*.tar
+data/**/*.tar.gz
+data/**/*.7z
+data/**/*.rar
+
+# Root-level large/binary/data files (non-approved)
 *.pkl
 *.joblib
-*.gpkg
-*.sqlite
-*.sqlite3
-*.db
-*.csv
-!HANDOVER_MANIFEST.csv
-!packages/leptowatch/sample_data/*.csv
+*.bin
+*.zip
 *.tar
 *.tar.gz
-*.zip
 *.7z
 *.rar
 
-# Model weights and ledger
-models/*.pkl
-models/*.joblib
+# Private development archives
+LeptoWatch_Private_Development_Handover.zip
+leptowatch_pack.zip
+
+# Model weights and ledger directories
+models/
 ledger/
-*.bin
+
+# ==========================================================================
+# APPROVED DEMONSTRATION DATA FILES
+# Each file below has been individually reviewed and confirmed to contain:
+#   - Only aggregate, de-identified, district-level epidemiological data
+#   - No individual patient records
+#   - No credentials or private keys
+#   - No locked-test period data (all pre-2025)
+#   - No model weights or serialized objects (except boundary .gpkg)
+# ==========================================================================
+
+# (No blanket exclusions needed for these specific paths — they are tracked normally)
+# The files are:
+#   data/staging/notebook_40_final_demo/demonstration_manifest.json
+#   data/staging/notebook_38_demo_data/dashboard_forecast_staging.parquet
+#   data/staging/notebook_38_demo_data/forecast_source_snapshot_staging.parquet
+#   data/staging/notebook_38_demo_data/cases_source_snapshot_unmodified.csv
+#   data/processed/cases_weekly.csv
+#   data/processed/features.parquet
+#   data/staging/model_experiments/oof_performance_reliability_scorecard/overall_metrics_staging.csv
+#   data/staging/model_readiness/rdhs_boundaries_candidate_staging.gpkg
+#   data/staging/website_demo_package_v1/historical_oof_for_website.csv
+#   LeptoWatch_E3_rainfall_2023.csv
+#   LeptoWatch_E3_soil_moisture_2023.csv
+#   LeptoWatch_E2_flood_series.csv
+
+# Handover manifest (approved for tracking)
+# HANDOVER_MANIFEST.csv is already tracked — no rule needed.
+
+# Sample data in packages directory (approved)
+# packages/leptowatch/sample_data/*.csv are allowed.
+# Any other CSV/parquet not listed above in data/ will be tracked by default.
+# If new data files are added, they must be reviewed before committing.
 
 # Logs
 logs/

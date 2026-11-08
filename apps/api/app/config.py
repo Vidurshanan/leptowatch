@@ -95,6 +95,13 @@ class Settings:
             / "model_readiness"
             / "rdhs_boundaries_candidate_staging.gpkg"
         )
+        self.historical_oof_path = (
+            self.leptowatch_root
+            / "data"
+            / "staging"
+            / "website_demo_package_v1"
+            / "historical_oof_for_website.csv"
+        )
 
 
 settings = Settings()

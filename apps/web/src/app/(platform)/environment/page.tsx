@@ -20,13 +20,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  ChartCard,
+  EnvironmentalChart,
+} from "@/components/charts";
 import {
   EnvironmentDetailResponse,
   fetchEnvironmentDetail,
@@ -92,29 +88,29 @@ export default function EnvironmentPage() {
   return (
     <div className="space-y-6">
       {/* Header with Selector */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/80 pb-4">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Environmental Intelligence
+              Environmental Intelligence &amp; Climate Telemetry
             </h1>
             <Badge variant="unverified">Experimental Staging</Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            CHIRPS precipitation, ERA5-Land soil moisture, and Sentinel-1 SAR flood proxy features.
+            Multi-source geospatial observations: CHIRPS precipitation, ERA5-Land volumetric soil moisture, and Sentinel-1 SAR flood proxies.
           </p>
         </div>
 
         {/* Dropdown Selector */}
         <div className="flex items-center gap-2">
-          <label htmlFor="env-rdhs-select" className="text-xs text-muted-foreground">
+          <label htmlFor="env-rdhs-select" className="text-xs font-medium text-muted-foreground whitespace-nowrap">
             Health Area:
           </label>
           <select
             id="env-rdhs-select"
             value={selectedRDHS}
             onChange={(e) => handleSelectRDHS(e.target.value)}
-            className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs text-foreground focus:border-cyan focus:outline-none"
+            className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-foreground focus:border-cyan focus:outline-none min-w-[200px]"
           >
             {rdhsList.map((item) => (
               <option key={item.rdhs} value={item.rdhs}>
@@ -126,12 +122,12 @@ export default function EnvironmentPage() {
       </div>
 
       {/* Critical Caveats Banner */}
-      <div className="rounded-md border border-amber/40 bg-surface-raised p-4">
+      <div className="rounded-md border border-amber/40 bg-surface-raised p-4 shadow-[var(--shadow-panel)]">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber" />
           <div className="space-y-1 text-xs leading-relaxed">
             <div className="font-semibold text-foreground">
-              Environmental Data Operational Caveats
+              Environmental Data Operational Caveats &amp; Attribution Integrity
             </div>
             <p className="text-muted-foreground">
               <strong className="text-foreground">Climate Reanalysis Notice:</strong>{" "}
@@ -163,7 +159,7 @@ export default function EnvironmentPage() {
 
       {/* Overview Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
               Selected RDHS / District
@@ -179,7 +175,7 @@ export default function EnvironmentPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
               Model Inputs As-Of Status
@@ -191,17 +187,17 @@ export default function EnvironmentPage() {
             </Badge>
             <p className="mt-2 text-xs text-muted-foreground">
               Issue-time verified:{" "}
-              <span className="font-semibold text-danger">
+              <span className="font-semibold text-rose-400">
                 {data?.issue_time_availability_verified ? "True" : "False"}
               </span>
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
-              SAR Flood Rule
+              SAR Flood Safety Rule
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -214,7 +210,7 @@ export default function EnvironmentPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
               Sentinel-1 Season
@@ -231,9 +227,28 @@ export default function EnvironmentPage() {
         </Card>
       </div>
 
+      {/* Primary Visualization: Dual-Axis Environmental Time-Series */}
+      <ChartCard
+        title={`Hydrometeorological Trajectory (2023) — ${data?.rdhs || selectedRDHS} RDHS`}
+        subtitle="Dual-axis visualization: CHIRPS total precipitation (mm) and ERA5-Land volumetric root-zone soil moisture (%) across 52 weeks."
+        badge={<Badge variant="staging">2023 Weekly Series</Badge>}
+        footnote="CHIRPS precipitation represents 0.05° gridded satellite infrared estimates. ERA5-Land represents reanalysis volumetric soil moisture (ECMWF)."
+        isLoading={isLoading}
+        error={error}
+        isEmpty={!data?.rainfall_series_2023 || data.rainfall_series_2023.length === 0}
+      >
+        {data?.rainfall_series_2023 && data?.soil_moisture_series_2023 && (
+          <EnvironmentalChart
+            rainfallSeries={data.rainfall_series_2023}
+            soilMoistureSeries={data.soil_moisture_series_2023}
+            height={300}
+          />
+        )}
+      </ChartCard>
+
       {/* Data Sources and Sentinel-1 Summary */}
       <div className="grid gap-4 md:grid-cols-2">
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="border-b border-border pb-3">
             <div className="flex items-center gap-2">
               <Database className="h-4 w-4 text-cyan" />
@@ -284,7 +299,7 @@ export default function EnvironmentPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="border-b border-border pb-3">
             <div className="flex items-center gap-2">
               <Waves className="h-4 w-4 text-amber" />
@@ -298,7 +313,7 @@ export default function EnvironmentPage() {
           </CardHeader>
           <CardContent className="pt-4 text-xs space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded border border-border bg-surface-muted p-2.5">
+              <div className="rounded border border-border bg-surface-raised p-2.5">
                 <div className="text-muted-foreground">Paddy Observations</div>
                 <div className="text-base font-bold font-mono text-foreground mt-0.5">
                   {data?.flood_summary?.paddy_obs !== null && data?.flood_summary?.paddy_obs !== undefined
@@ -308,7 +323,7 @@ export default function EnvironmentPage() {
                     : "Unavailable"}
                 </div>
               </div>
-              <div className="rounded border border-border bg-surface-muted p-2.5">
+              <div className="rounded border border-border bg-surface-raised p-2.5">
                 <div className="text-muted-foreground">Land Observations</div>
                 <div className="text-base font-bold font-mono text-foreground mt-0.5">
                   {data?.flood_summary?.land_obs !== null && data?.flood_summary?.land_obs !== undefined
@@ -319,7 +334,7 @@ export default function EnvironmentPage() {
                 </div>
               </div>
             </div>
-            <div className="rounded border border-border bg-surface-muted p-2.5">
+            <div className="rounded border border-border bg-surface-raised p-2.5">
               <div className="text-muted-foreground">Detector Safety Rule:</div>
               <div className="text-foreground font-mono mt-0.5 text-[11px]">
                 {data?.flood_summary?.rule ||
@@ -331,7 +346,7 @@ export default function EnvironmentPage() {
       </div>
 
       {/* Model Lag Features Matrix */}
-      <Card>
+      <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
         <CardHeader className="border-b border-border pb-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-cyan" />
@@ -349,7 +364,7 @@ export default function EnvironmentPage() {
               Loading environmental lag features...
             </div>
           ) : error ? (
-            <div className="py-6 text-center text-xs text-danger">{error}</div>
+            <div className="py-6 text-center text-xs text-rose-400">{error}</div>
           ) : data && Object.keys(data.latest_lag_features).length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {Object.entries(data.latest_lag_features).map(([key, val]) => (
@@ -373,99 +388,6 @@ export default function EnvironmentPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* Historical 2023 Environmental Series */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Rainfall Series */}
-        <Card>
-          <CardHeader className="border-b border-border pb-3">
-            <div className="flex items-center gap-2">
-              <CloudRain className="h-4 w-4 text-cyan" />
-              <CardTitle className="text-sm font-semibold">
-                Historical CHIRPS Rainfall (2023 Weekly Series)
-              </CardTitle>
-            </div>
-            <CardDescription className="text-xs">
-              Total weekly rainfall in millimeters for {selectedRDHS}.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {data?.rainfall_series_2023 && data.rainfall_series_2023.length > 0 ? (
-              <div className="max-h-64 overflow-y-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Week Start</TableHead>
-                      <TableHead className="text-right">Rainfall (mm)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.rainfall_series_2023.map((pt) => (
-                      <TableRow key={pt.week_start}>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {pt.week_start}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-medium text-cyan-bright text-xs">
-                          {pt.rainfall_mm.toFixed(1)} mm
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="py-6 text-center text-xs text-muted-foreground">
-                No 2023 weekly rainfall series available in staging dataset.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Soil Moisture Series */}
-        <Card>
-          <CardHeader className="border-b border-border pb-3">
-            <div className="flex items-center gap-2">
-              <Droplets className="h-4 w-4 text-teal" />
-              <CardTitle className="text-sm font-semibold">
-                Historical ERA5-Land Soil Moisture (2023 Weekly Series)
-              </CardTitle>
-            </div>
-            <CardDescription className="text-xs">
-              Volumetric soil moisture fraction (m³/m³) for {selectedRDHS}.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {data?.soil_moisture_series_2023 && data.soil_moisture_series_2023.length > 0 ? (
-              <div className="max-h-64 overflow-y-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Week Start</TableHead>
-                      <TableHead className="text-right">Volumetric Fraction</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.soil_moisture_series_2023.map((pt) => (
-                      <TableRow key={pt.week_start}>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {pt.week_start}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-medium text-teal text-xs">
-                          {pt.volumetric_fraction.toFixed(3)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="py-6 text-center text-xs text-muted-foreground">
-                No 2023 weekly soil moisture series available in staging dataset.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }

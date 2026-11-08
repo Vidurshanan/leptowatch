@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   Activity,
   AlertCircle,
-  Calendar,
   Clock,
   ExternalLink,
   Layers,
@@ -31,33 +30,54 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  ChartCard,
+  WeeklyCasesBarChart,
+  RDHSComparisonChart,
+  StatusDonutChart,
+} from "@/components/charts";
+import {
   DashboardSummaryResponse,
   fetchDashboardSummary,
   fetchRDHSList,
   RDHSSummaryItem,
+  fetchDataQuality,
+  DataQualityResponse,
+  fetchHistory,
+  HistoryResponse,
+  fetchAlertsLatest,
+  AlertListResponse,
 } from "@/lib/api";
 import { getTierBadgeVariant } from "@/lib/utils";
 
 export default function OverviewPage() {
   const [summary, setSummary] = useState<DashboardSummaryResponse | null>(null);
   const [rdhsList, setRdhsList] = useState<RDHSSummaryItem[]>([]);
+  const [qualityData, setQualityData] = useState<DataQualityResponse | null>(null);
+  const [referenceHistory, setReferenceHistory] = useState<HistoryResponse | null>(null);
+  const [alertsData, setAlertsData] = useState<AlertListResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
+
+    Promise.allSettled([
       fetchDashboardSummary(controller.signal),
       fetchRDHSList(controller.signal),
+      fetchDataQuality(controller.signal),
+      fetchHistory("Colombo", 32, controller.signal),
+      fetchAlertsLatest(controller.signal),
     ])
-      .then(([summaryData, rdhsData]) => {
-        setSummary(summaryData);
-        setRdhsList(rdhsData.records);
-        setIsLoading(false);
-      })
-      .catch((err) => {
-        if (err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Failed to load dashboard summary");
+      .then(([summaryRes, rdhsRes, qualityRes, historyRes, alertsRes]) => {
+        if (summaryRes.status === "fulfilled") setSummary(summaryRes.value);
+        if (rdhsRes.status === "fulfilled") setRdhsList(rdhsRes.value.records);
+        if (qualityRes.status === "fulfilled") setQualityData(qualityRes.value);
+        if (historyRes.status === "fulfilled") setReferenceHistory(historyRes.value);
+        if (alertsRes.status === "fulfilled") setAlertsData(alertsRes.value);
+
+        if (summaryRes.status === "rejected" && summaryRes.reason?.name !== "AbortError") {
+          setError(summaryRes.reason?.message || "Failed to load dashboard summary");
+        }
         setIsLoading(false);
       });
 
@@ -66,32 +86,60 @@ export default function OverviewPage() {
     };
   }, []);
 
+  // Build tier distribution slices for donut chart
+  const tierSlices = (() => {
+    if (!summary?.tier_counts) return [];
+    const colors: Record<string, string> = {
+      Critical: "#EF4444",
+      Warning: "#F97316",
+      Watch: "#F59E0B",
+      Advisory: "#38BDF8",
+      Normal: "#10B981",
+      Clear: "#10B981",
+    };
+    return Object.entries(summary.tier_counts).map(([tier, count]) => ({
+      name: tier,
+      value: count,
+      color: colors[tier] || "#64748B",
+    }));
+  })();
+
+  // Build data quality breakdown slices
+  const qualitySlices = (() => {
+    if (!qualityData?.national_summary) return [];
+    const s = qualityData.national_summary;
+    return [
+      { name: "Accepted Reports", value: s.accepted_reports, color: "#10B981" },
+      { name: "Missing Reports", value: s.missing_reports, color: "#F59E0B" },
+      { name: "Non-Reporting", value: s.nonreporting_reports, color: "#64748B" },
+    ];
+  })();
+
   return (
     <div className="space-y-6">
       {/* Top Banner: Staging Notice */}
-      <div className="rounded-md border border-cyan/30 bg-surface-raised p-4">
+      <div className="rounded-md border border-cyan/30 bg-surface-raised p-4 shadow-[var(--shadow-panel)]">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-start gap-3">
             <Activity className="mt-0.5 h-5 w-5 shrink-0 text-cyan" />
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-foreground">
+                <h1 className="text-base font-semibold text-foreground">
                   National Leptospirosis Surveillance Platform
-                </h2>
+                </h1>
                 <Badge variant="unverified">Experimental Staging</Badge>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Reproducible staging demonstration for 26 RDHS health areas.
-                Derived from verified pre-2025 pipeline data. Not approved for
-                operational public-health action.
+              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                Reproducible epidemiological intelligence demonstration across all 26 RDHS health areas (including Kalmunai separate from Ampara).
+                Derived strictly from pre-2025 verified pipelines. Model status: <span className="font-mono text-cyan">EXPERIMENTAL_STAGING_NOT_PRODUCTION_APPROVED</span>.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Link href="/geographic">
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-cyan/40 hover:bg-cyan/10">
                 <MapPin className="h-3.5 w-3.5 text-cyan" />
-                Open Map
+                GIS Intelligence Map
               </Button>
             </Link>
           </div>
@@ -100,59 +148,53 @@ export default function OverviewPage() {
 
       {/* KPI Cards Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              National Coverage
+              National Health Areas
             </CardTitle>
             <Layers className="h-4 w-4 text-cyan" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-cyan-bright">
-              {summary ? `${summary.rdhs_count} RDHS` : isLoading ? "Loading..." : "--"}
+            <div className="text-2xl font-bold font-mono text-cyan-bright">
+              {summary ? `${summary.rdhs_count} RDHS` : isLoading ? "Loading..." : "26 RDHS"}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Includes Kalmunai separate from Ampara
+              100% complete partition (Kalmunai separate)
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Staging Alert Status
+              Provisional Alerts
             </CardTitle>
-            <AlertCircle className="h-4 w-4 text-watch" />
+            <AlertCircle className="h-4 w-4 text-amber-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
+            <div className="text-2xl font-bold font-mono text-foreground">
+              {alertsData ? `${alertsData.count} Areas Active` : isLoading ? "Loading..." : "--"}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
               {summary?.tier_counts
                 ? Object.entries(summary.tier_counts)
                     .map(([tier, count]) => `${count} ${tier}`)
-                    .join(", ") || "No tier data"
-                : isLoading
-                  ? "Loading..."
-                  : "Unavailable"}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {summary?.data_quality_counts
-                ? Object.entries(summary.data_quality_counts)
-                    .map(([status, count]) => `${count} ${status}`)
-                    .join(", ") || "Quality data unavailable"
-                : "Input verification pending"}
+                    .join(", ")
+                : "Watch-Unverified status active"}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Case Reporting Freshness
+              Case Data Freshness
             </CardTitle>
-            <Clock className="h-4 w-4 text-amber" />
+            <Clock className="h-4 w-4 text-amber-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber">
+            <div className="text-2xl font-bold font-mono text-amber-400">
               {summary?.freshness?.age_days !== null && summary?.freshness?.age_days !== undefined
                 ? `${summary.freshness.age_days} days`
                 : isLoading
@@ -161,213 +203,219 @@ export default function OverviewPage() {
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {summary?.freshness
-                ? `Latest ok: ${summary.freshness.latest_accepted_date ?? "None"} (Threshold: ${summary.freshness.policy_threshold_days}d)`
-                : "Freshness policy unavailable"}
+                ? `Latest ok: ${summary.freshness.latest_accepted_date ?? "None"} (56d internal policy)`
+                : "Policy: 56-day internal gating limit"}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Operational Approval
             </CardTitle>
-            <ShieldAlert className="h-4 w-4 text-danger" />
+            <ShieldAlert className="h-4 w-4 text-rose-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-danger">
-              {summary
-                ? summary.operational_approval
-                  ? "APPROVED"
-                  : "FALSE"
-                : isLoading
-                  ? "Checking..."
-                  : "Unavailable"}
+            <div className="text-2xl font-bold font-mono text-rose-500">
+              {summary?.operational_approval ? "APPROVED" : "FALSE"}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              EXPERIMENTAL_STAGING_NOT_PRODUCTION_APPROVED
+            <p className="mt-1 text-[11px] font-mono text-muted-foreground truncate">
+              NOT_PRODUCTION_APPROVED
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Grid: RDHS Table + Limitations */}
+      {/* Primary Analytics Charts Section */}
       <div className="grid gap-6 lg:grid-cols-12">
-        {/* Left Column: RDHS Surveillance Overview (8 cols) */}
-        <div className="lg:col-span-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-base font-semibold">
-                  RDHS Area Surveillance Status
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Provisional alerts and predicted mean cases across all 26 health areas
-                </CardDescription>
-              </div>
-              <Link href="/rdhs">
-                <Button variant="ghost" size="sm" className="gap-1 text-xs text-cyan">
-                  View All <ExternalLink className="h-3 w-3" />
+        {/* Left Column: Historical Weekly Cases Chart (7 cols) */}
+        <div className="lg:col-span-7">
+          <ChartCard
+            title="Weekly Surveillance Trajectory — High-Burden Reference (Colombo RDHS)"
+            subtitle="Verified historical accepted case reports (pre-2025 panel). Missing reports preserved as null."
+            badge={<Badge variant="unverified">Reference RDHS</Badge>}
+            action={
+              <Link href="/rdhs?id=Colombo">
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-cyan gap-1">
+                  Detail <ExternalLink className="size-3" />
                 </Button>
               </Link>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="py-12 text-center text-sm text-muted-foreground">
-                  Loading staging surveillance data...
-                </div>
-              ) : error ? (
-                <div className="py-8 text-center text-sm text-danger">{error}</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>RDHS Area</TableHead>
-                        <TableHead>District</TableHead>
-                        <TableHead>Tier</TableHead>
-                        <TableHead>Data Quality</TableHead>
-                        <TableHead className="text-right">Predicted (μ)</TableHead>
-                        <TableHead className="text-right">Elevated (pE)</TableHead>
-                        <TableHead className="text-right">High (pH)</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {rdhsList.slice(0, 10).map((row) => (
-                        <TableRow key={row.rdhs}>
-                          <TableCell className="font-medium text-foreground">
-                            <Link
-                              href={`/rdhs?id=${encodeURIComponent(row.rdhs)}`}
-                              className="hover:text-cyan hover:underline"
-                            >
-                              {row.rdhs}
-                            </Link>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {row.district}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={getTierBadgeVariant(row.tier)}>
-                              {row.tier || "Unavailable"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={row.data_quality_status === "VERIFIED" ? "teal" : "unverified"}>
-                              {row.data_quality_status || "UNVERIFIED"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-cyan-bright">
-                            {row.mu !== null ? row.mu.toFixed(1) : "--"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {row.pE !== null ? row.pE.toFixed(3) : "--"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {row.pH !== null ? row.pH.toFixed(3) : "--"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <p className="mt-3 text-right text-[11px] text-muted-foreground">
-                    Showing 10 of 26 RDHS areas.{" "}
-                    <Link href="/rdhs" className="text-cyan underline">
-                      View complete table in RDHS Profiles &rarr;
-                    </Link>
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            }
+            footnote="Zero-filling missing reports is strictly forbidden. Reports with status 'nonreporting' or 'no_accepted_report' are represented with gaps."
+            isLoading={isLoading}
+            error={error}
+            isEmpty={!referenceHistory?.records || referenceHistory.records.length === 0}
+          >
+            {referenceHistory && (
+              <WeeklyCasesBarChart records={referenceHistory.records} height={270} />
+            )}
+          </ChartCard>
         </div>
 
-        {/* Right Column: Known Limitations & Provenance (4 cols) */}
-        <div className="space-y-4 lg:col-span-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-amber" />
-                <CardTitle className="text-sm font-semibold">
-                  Known Project Limitations
-                </CardTitle>
-              </div>
-              <CardDescription className="text-xs">
-                Demonstration manifest constraints
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2.5 text-xs text-muted-foreground">
-                <li className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
-                  <span>
-                    Accepted case freshness gate (&gt;56 days) blocks operational
-                    use.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
-                  <span>
-                    Staging inference does not establish current-period predictive
-                    validity.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
-                  <span>
-                    Environmental predictor issue-time availability has not been
-                    verified.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
-                  <span>
-                    Alert thresholds are synthetic staging values, not production-approved.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
-                  <span>
-                    Locked test period beginning 2025-01-01 has not been evaluated.
-                  </span>
-                </li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-cyan" />
-                <CardTitle className="text-sm font-semibold">
-                  Demonstration Timeline
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 text-xs">
-              <div className="flex justify-between border-b border-border py-1">
-                <span className="text-muted-foreground">Staging Issue Week:</span>
-                <span className="font-mono text-cyan-bright">
-                  {summary?.issue_start ?? (isLoading ? "Loading..." : "Unavailable")}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-border py-1">
-                <span className="text-muted-foreground">Latest Accepted Case:</span>
-                <span className="font-mono text-amber">
-                  {summary?.freshness?.latest_accepted_date ?? (isLoading ? "Loading..." : "Unavailable")}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-border py-1">
-                <span className="text-muted-foreground">Locked Test Boundary:</span>
-                <span className="font-mono text-foreground">2025-01-01</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-muted-foreground">Evaluation Status:</span>
-                <span className="font-mono text-muted-foreground">NOT_EVALUATED</span>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Right Column: RDHS Risk Comparison Bar Chart (5 cols) */}
+        <div className="lg:col-span-5">
+          <ChartCard
+            title="Exceedance Risk Comparison (pE)"
+            subtitle="Top RDHS areas ranked by probability of elevated incidence (pE)."
+            badge={<Badge variant="staging">Staging Scores</Badge>}
+            action={
+              <Link href="/rdhs">
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-cyan gap-1">
+                  All 26 <ExternalLink className="size-3" />
+                </Button>
+              </Link>
+            }
+            footnote="pE represents the probability of exceeding the historical threshold. Derived from baseline B2 / detector fusion."
+            isLoading={isLoading}
+            error={error}
+            isEmpty={rdhsList.length === 0}
+          >
+            <RDHSComparisonChart records={rdhsList} metricKey="pE" unit="%" height={270} limit={8} />
+          </ChartCard>
         </div>
       </div>
+
+      {/* Secondary Row: Donut Charts for Status & Quality */}
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-12">
+        {/* Donut 1: Tier Distribution (6 cols) */}
+        <div className="lg:col-span-6">
+          <ChartCard
+            title="Surveillance Tier Distribution"
+            subtitle="Provisional classification across all 26 health administrative areas."
+            badge={<Badge variant="staging">26 Areas</Badge>}
+            footnote="Classifications are provisional. Watch-Unverified indicates telemetry freshness gating failed."
+            isLoading={isLoading}
+            error={error}
+            isEmpty={tierSlices.length === 0}
+          >
+            <StatusDonutChart
+              slices={tierSlices}
+              centerLabel="RDHS Areas"
+              centerValue={summary?.rdhs_count ?? 26}
+              height={220}
+            />
+          </ChartCard>
+        </div>
+
+        {/* Donut 2: Reporting Quality Breakdown (6 cols) */}
+        <div className="lg:col-span-6">
+          <ChartCard
+            title="National Historical Reporting Quality"
+            subtitle="Total historical reports recorded across pre-2025 surveillance panel."
+            badge={<Badge variant="unverified">Audit</Badge>}
+            action={
+              <Link href="/data-quality">
+                <Button variant="ghost" size="sm" className="h-7 text-xs text-cyan gap-1">
+                  Quality Audit <ExternalLink className="size-3" />
+                </Button>
+              </Link>
+            }
+            footnote="Only reports with verified status 'ok' are accepted into feature extraction and baseline evaluation."
+            isLoading={isLoading}
+            error={error}
+            isEmpty={qualitySlices.length === 0}
+          >
+            <StatusDonutChart
+              slices={qualitySlices}
+              centerLabel="Reports"
+              centerValue={qualityData?.national_summary?.total_reports ? qualityData.national_summary.total_reports.toLocaleString() : "--"}
+              height={220}
+            />
+          </ChartCard>
+        </div>
+      </div>
+
+      {/* RDHS Area Surveillance Table */}
+      <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base font-semibold">
+              RDHS Area Surveillance Status
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Provisional alerts, data quality verification, and predicted incidence across all 26 RDHS entities
+            </CardDescription>
+          </div>
+          <Link href="/rdhs">
+            <Button variant="ghost" size="sm" className="gap-1 text-xs text-cyan">
+              View All 26 Profiles <ExternalLink className="h-3 w-3" />
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              Loading staging surveillance data...
+            </div>
+          ) : error ? (
+            <div className="py-8 text-center text-sm text-rose-400">{error}</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>RDHS Area</TableHead>
+                    <TableHead>District</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead>Data Quality</TableHead>
+                    <TableHead className="text-right">Predicted (μ)</TableHead>
+                    <TableHead className="text-right">Elevated (pE)</TableHead>
+                    <TableHead className="text-right">High (pH)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rdhsList.slice(0, 10).map((row) => (
+                    <TableRow key={row.rdhs} className="hover:bg-surface-raised/60">
+                      <TableCell className="font-medium text-foreground">
+                        <Link
+                          href={`/rdhs?id=${encodeURIComponent(row.rdhs)}`}
+                          className="hover:text-cyan hover:underline flex items-center gap-1.5"
+                        >
+                          {row.rdhs}
+                          {row.rdhs === "Kalmunai" && (
+                            <span className="text-[10px] text-cyan bg-cyan/10 px-1 py-0.2 rounded font-mono">
+                              Separate RDHS
+                            </span>
+                          )}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {row.district}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getTierBadgeVariant(row.tier)}>
+                          {row.tier}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {row.data_quality_status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {row.mu !== null && row.mu !== undefined
+                          ? row.mu.toFixed(2)
+                          : <span className="text-muted-foreground">Unavailable</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-cyan">
+                        {row.pE !== null && row.pE !== undefined
+                          ? `${(row.pE * 100).toFixed(1)}%`
+                          : <span className="text-muted-foreground">Unavailable</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-amber-400">
+                        {row.pH !== null && row.pH !== undefined
+                          ? `${(row.pH * 100).toFixed(1)}%`
+                          : <span className="text-muted-foreground">Unavailable</span>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

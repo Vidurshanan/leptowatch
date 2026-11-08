@@ -71,3 +71,40 @@ class ForecastDetailResponse(BaseModel):
             if v < 0.0 or v > 1.0:
                 raise ValueError(f"Probability must be between 0.0 and 1.0, got {v}")
         return v
+
+
+class HistoricalValidationRecord(BaseModel):
+    """Retrospective out-of-fold benchmark record for an RDHS."""
+    t: int
+    issue_start: str
+    target_period: str = "t+3..t+5"
+    predicted_mu: Optional[float] = None
+    actual_y35: Optional[float] = None
+    lo: Optional[float] = None
+    hi: Optional[float] = None
+    pE: Optional[float] = None
+    pH: Optional[float] = None
+
+
+class HistoricalValidationSummary(BaseModel):
+    """Summary of historical model validation performance."""
+    sample_count: int
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+    evaluated_year: int = 2024
+    target_definition: str = (
+        "y35: Reported leptospirosis case total accumulated over forecast weeks t+3 through t+5"
+    )
+    status_label: str = "HISTORICAL MODEL VALIDATION — NOT CURRENT FORECAST"
+    caveat: str = (
+        "Retrospective out-of-fold benchmark predictions (2012–2024). "
+        "Strictly quarantined from locked test data (2025-01-01 onwards). "
+        "Must never be presented as current operational forecasts."
+    )
+
+
+class HistoricalValidationResponse(BaseModel):
+    """Historical validation dataset for an RDHS area."""
+    rdhs: str
+    summary: HistoricalValidationSummary
+    records: List[HistoricalValidationRecord]

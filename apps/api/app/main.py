@@ -18,6 +18,7 @@ from app.routers import (
     model_router,
     data_quality_router,
     geo_router,
+    historical_validation_router,
 )
 
 
@@ -77,6 +78,7 @@ app.include_router(forecasts_router, prefix=api_prefix)
 app.include_router(alerts_router, prefix=api_prefix)
 app.include_router(environment_router, prefix=api_prefix)
 app.include_router(history_router, prefix=api_prefix)
+app.include_router(historical_validation_router, prefix=api_prefix)
 app.include_router(model_router, prefix=api_prefix)
 app.include_router(data_quality_router, prefix=api_prefix)
 app.include_router(geo_router, prefix=api_prefix)
