@@ -19,14 +19,17 @@ from app.routers import (
     data_quality_router,
     geo_router,
     historical_validation_router,
+    simulator_router,
 )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan: preload staging datasets into memory cache."""
+    """Application lifespan: preload staging datasets and model bundle into memory cache."""
     try:
         data_loader.load_all()
+        from app.services.simulator_service import simulator_service
+        simulator_service.preload_bundle_safe()
     except Exception as e:
         print(f"Warning during staging dataset preload: {e}")
     yield
@@ -48,7 +51,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -82,6 +85,7 @@ app.include_router(historical_validation_router, prefix=api_prefix)
 app.include_router(model_router, prefix=api_prefix)
 app.include_router(data_quality_router, prefix=api_prefix)
 app.include_router(geo_router, prefix=api_prefix)
+app.include_router(simulator_router, prefix=api_prefix)
 
 
 if __name__ == "__main__":

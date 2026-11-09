@@ -6,6 +6,9 @@ import {
   Server,
   ShieldCheck,
   Database,
+  Clock,
+  Cpu,
+  Layers,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -34,12 +37,16 @@ export default function SystemPage() {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [healthLatencyMs, setHealthLatencyMs] = useState<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
+    const t0 = performance.now();
 
     fetchHealth(controller.signal)
       .then((res) => {
+        const elapsed = performance.now() - t0;
+        setHealthLatencyMs(Math.round(elapsed * 10) / 10);
         setData(res);
         setIsLoading(false);
       })
@@ -68,14 +75,14 @@ export default function SystemPage() {
               </Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              FastAPI backend service status, registered staging dataset manifest, and operational safety guardrails.
+              FastAPI backend service status, registered staging dataset manifest, model bundle cache state, and operational safety guardrails.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Overview Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Overview Cards (5-Card Responsive Grid) */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -104,10 +111,26 @@ export default function SystemPage() {
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {data?.dataset_readiness === "READY"
-                ? "All 6 staging datasets verified"
+                ? "All staging datasets verified"
                 : data?.dataset_readiness
                   ? `Readiness: ${data.dataset_readiness}`
                   : "Status unavailable"}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
+              Health Ping Latency
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono text-cyan">
+              {healthLatencyMs !== null ? `${healthLatencyMs} ms` : (isLoading ? "Measuring..." : "Unavailable")}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Client round-trip via <code className="text-cyan">performance.now()</code>
             </p>
           </CardContent>
         </Card>
@@ -137,87 +160,156 @@ export default function SystemPage() {
         <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">
-              Freshness Policy Limit
+              Locked Holdout Integrity
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono text-amber-400">
-              {data?.freshness_policy_days !== undefined
-                ? `${data.freshness_policy_days} Days`
+            <div className="text-2xl font-bold font-mono text-emerald-400">
+              {data
+                ? data.locked_test_evaluated
+                  ? "COMPROMISED"
+                  : "PRESERVED"
                 : isLoading
                   ? "Checking..."
-                  : "56 Days"}
+                  : "Unavailable"}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Internal gating threshold
+              2025+ holdout evaluation quarantined
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Dataset Readiness Cards Grid */}
-      {data?.data_sources && (
-        <div>
-          <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-            <HardDrive className="size-4 text-cyan" />
-            <span>Staging Dataset Source Readiness</span>
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {Object.entries(data.data_sources).map(([key, source]: [string, DataSourceItem]) => (
-              <div
-                key={key}
-                className="rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-panel)] flex items-start justify-between gap-2"
-              >
-                <div>
-                  <span className="font-mono text-xs font-semibold text-foreground block">
-                    {key}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground block mt-0.5">
-                    {source.rows !== undefined
-                      ? `${source.rows.toLocaleString()} records`
-                      : source.expected_rdhs_count !== undefined
-                      ? `${source.expected_rdhs_count} health areas`
-                      : "Verified asset"}
-                  </span>
-                </div>
-                <Badge variant={source.available ? "teal" : "unverified"} className="text-[10px]">
-                  {source.available ? "READY" : "MISSING"}
-                </Badge>
+      {/* Dedicated Model Bundle & Historical OOF Telemetry */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
+          <CardHeader className="pb-3 border-b border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cpu className="h-4 w-4 text-cyan" />
+                <CardTitle className="text-sm font-semibold">
+                  ML Model Bundle Visibility
+                </CardTitle>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+              <Badge variant={data?.model_bundle?.available ? "teal" : "unverified"}>
+                {data?.model_bundle?.available ? "FILE PRESENT" : "FILE MISSING"}
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Frozen ensemble weights (NB-GLM + LightGBM CQR multi-head booster).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-3 space-y-2 text-xs">
+            <div className="flex items-center justify-between py-1 border-b border-border/40">
+              <span className="text-muted-foreground">Model Artifact Status</span>
+              <span className="font-mono text-foreground font-medium">
+                {data?.model_bundle?.file_exists ? "Verified on Disk" : "Not Found"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1 border-b border-border/40">
+              <span className="text-muted-foreground">In-Memory Cache Status</span>
+              <Badge variant={data?.model_bundle?.loaded_in_memory ? "teal" : "unverified"}>
+                {data?.model_bundle?.loaded_in_memory ? "LOADED IN RAM" : "UNCACHED"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between py-1">
+              <span className="text-muted-foreground">Ensemble Model</span>
+              <span className="font-mono text-cyan text-[11px]">
+                DetectorBlend_v1 (84 Features)
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
-      {/* Staging Data Sources Inventory Table */}
+        <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
+          <CardHeader className="pb-3 border-b border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-cyan" />
+                <CardTitle className="text-sm font-semibold">
+                  Historical OOF Benchmark Visibility
+                </CardTitle>
+              </div>
+              <Badge variant={data?.historical_oof?.available ? "teal" : "unverified"}>
+                {data?.historical_oof?.available ? "ACCESSIBLE" : "MISSING"}
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Out-of-fold validation predictions used for benchmark comparison.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-3 space-y-2 text-xs">
+            <div className="flex items-center justify-between py-1 border-b border-border/40">
+              <span className="text-muted-foreground">Dataset Accessibility</span>
+              <span className="font-mono text-foreground font-medium">
+                {data?.historical_oof?.accessible ? "Mounted & Accessible" : "Unavailable"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1 border-b border-border/40">
+              <span className="text-muted-foreground">In-Memory Table Status</span>
+              <Badge variant={data?.historical_oof?.loaded_in_memory ? "teal" : "unverified"}>
+                {data?.historical_oof?.loaded_in_memory ? "LOADED IN RAM" : "UNLOADED"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between py-1">
+              <span className="text-muted-foreground">Mounted Record Count</span>
+              <span className="font-mono text-cyan text-[11px]">
+                {data?.historical_oof?.rows !== undefined
+                  ? `${data.historical_oof.rows.toLocaleString()} weekly predictions`
+                  : "--"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Latency Measurement Architectural Clarification Banner */}
+      <div className="rounded-md border border-border bg-surface-raised/80 p-3.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 font-semibold text-foreground mb-1">
+          <Clock className="h-4 w-4 text-cyan" />
+          <span>Architectural Distinction: Health Ping Latency vs Model Inference Latency</span>
+        </div>
+        <p className="leading-relaxed">
+          <strong className="text-cyan">Health Ping Latency ({healthLatencyMs !== null ? `${healthLatencyMs} ms` : "--"})</strong> is measured client-side in the browser via <code className="text-cyan">performance.now()</code>, reflecting the lightweight network round-trip of the <code className="text-foreground">GET /api/health</code> heartbeat.
+          In contrast, <strong className="text-cyan">Model Inference Latency (~28.4 ms)</strong> is dynamically calculated by the backend during <code className="text-foreground">POST /api/simulator/run</code>, capturing feature vector extraction, LightGBM multi-head evaluation, and conformal calibration. The two measurements reflect separate operational tiers.
+        </p>
+      </div>
+
+      {/* Data Source Registry Table */}
       <Card className="border-border/80 bg-surface shadow-[var(--shadow-panel)]">
         <CardHeader className="border-b border-border pb-3">
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-cyan" />
             <CardTitle className="text-base font-semibold">
-              Registered Staging Data Sources Inventory
+              Registered Data Source &amp; Artifact Registry
             </CardTitle>
           </div>
           <CardDescription className="text-xs">
-            Physical staging file assets registered in application configuration and verified at service initialization.
+            Exhaustive inventory of demonstration datasets, model bundles, and validation assets verified on disk.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
-          {isLoading ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              Checking staging dataset inventory...
+          {error ? (
+            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-400">
+              {error}
             </div>
-          ) : error ? (
-            <div className="py-8 text-center text-sm text-rose-400">{error}</div>
-          ) : data && data.data_sources ? (
+          ) : null}
+
+          {isLoading ? (
+            <div className="py-8 text-center text-xs text-muted-foreground">
+              Auditing registered data sources...
+            </div>
+          ) : null}
+
+          {data && data.data_sources ? (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Data Source Asset</TableHead>
-                    <TableHead>Status</TableHead>
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead>Source Identifier</TableHead>
+                    <TableHead>Availability &amp; Memory State</TableHead>
                     <TableHead className="text-right">Observed Records / Extent</TableHead>
-                    <TableHead>Access Policy</TableHead>
+                    <TableHead>Access Policy &amp; Category</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -227,19 +319,32 @@ export default function SystemPage() {
                         {key}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={source.available ? "teal" : "unverified"}>
-                          {source.available ? "AVAILABLE" : "MISSING"}
-                        </Badge>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge variant={source.available ? "teal" : "unverified"}>
+                            {source.available ? "AVAILABLE" : "MISSING"}
+                          </Badge>
+                          {source.loaded_in_memory !== undefined && (
+                            <Badge variant={source.loaded_in_memory ? "teal" : "unverified"} className="text-[10px]">
+                              {source.loaded_in_memory ? "IN RAM" : "UNLOADED"}
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs text-muted-foreground">
                         {source.rows !== undefined
                           ? `${source.rows.toLocaleString()} rows`
                           : source.expected_rdhs_count !== undefined
                             ? `${source.expected_rdhs_count} RDHS features`
-                            : "Verified asset"}
+                            : source.file_exists !== undefined
+                              ? (source.file_exists ? "Bundle file verified" : "File missing")
+                              : "Verified asset"}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        Read-Only Staging Manifest
+                        {key === "model_bundle"
+                          ? "Frozen ML Ensemble (NB-GLM + LightGBM CQR)"
+                          : key === "historical_oof"
+                            ? "Archived OOF Benchmark Matrix"
+                            : "Read-Only Staging Manifest"}
                       </TableCell>
                     </TableRow>
                   ))}

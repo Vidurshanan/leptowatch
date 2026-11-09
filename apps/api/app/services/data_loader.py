@@ -30,8 +30,8 @@ RDHS_DISTRICT_MAP = {
     "Mannar": "Mannar",
     "Matale": "Matale",
     "Matara": "Matara",
-    "Monaragala": "Monaragala",
-    "Mullaitivu": "Mullaitivu",
+    "Monaragala": "Moneragala",   # CSV spelling: Moneragala (not Monaragala)
+    "Mullaitivu": "Mullattivu",   # CSV spelling: Mullattivu (not Mullaitivu)
     "Nuwara Eliya": "Nuwara Eliya",
     "Polonnaruwa": "Polonnaruwa",
     "Puttalam": "Puttalam",

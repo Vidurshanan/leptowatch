@@ -11,6 +11,7 @@ from app.routers.model import router as model_router
 from app.routers.data_quality import router as data_quality_router
 from app.routers.geo import geo_router
 from app.routers.historical_validation import router as historical_validation_router
+from app.routers.simulator import router as simulator_router
 
 __all__ = [
     "health_router",
@@ -23,4 +24,6 @@ __all__ = [
     "model_router",
     "data_quality_router",
     "geo_router",
+    "historical_validation_router",
+    "simulator_router",
 ]

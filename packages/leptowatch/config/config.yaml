@@ -1,0 +1,133 @@
+# =====================================================================
+# LeptoWatch configuration. Every script reads this file.
+# Change values HERE, never inside the code.
+# =====================================================================
+
+project:
+  name: LeptoWatch
+  team: RootBotZ
+  version: "1.0.0"
+
+# Where data lives. In Colab this is your Google Drive folder.
+# Override with the environment variable LW_DATA_ROOT.
+paths:
+  data_root: /content/drive/MyDrive/LeptoWatch/data
+
+# Your Google Cloud project registered for Earth Engine (noncommercial), e.g. "leptowatch-475012".
+# Each team member can use their own project to split the monthly quota.
+earth_engine_project: "leptowatch-511915"
+
+  # sub-folders are created automatically:
+  #   raw/wer_pdfs  raw/ee  raw/boundaries  raw/openmeteo
+  #   interim  processed  models  reports  ledger  outputs
+
+# ---------------------------------------------------------------------
+# Weekly Epidemiological Report (case data)
+# ---------------------------------------------------------------------
+wer:
+  listing_url: https://www.epid.gov.lk/weekly-epidemiological-report
+  archive_repo: https://github.com/hsandamini/SriLanka_Leptospirosis_Dataset.git
+  user_agent: "LeptoWatch research (ModelX 2.0, RootBotZ); contact: premashainath2005@gmail.com"
+  polite_delay_seconds: 2.0
+  first_year: 2007
+  # Weeks were Saturday-Friday until the end of 2025 and Monday-Sunday (ISO) from 2026
+  # ("The WRCD reporting week was revised from Saturday-Friday to Monday-Sunday", WER Vol 53 No 02).
+  monday_weeks_from_year: 2026
+
+# ---------------------------------------------------------------------
+# Forecast design (fixed BEFORE any testing; see proposal Section 6)
+# ---------------------------------------------------------------------
+forecast:
+  main_horizon: [3, 5]        # forecast the total over weeks t+3..t+5
+  imminent_horizon: [1, 2]    # safety-net forecast over weeks t+1..t+2
+  # Publication lag of the WER in weeks: on issue week t, case data are known up to t - lag.
+  # Measured from report upload dates (audit_summary.json: median_upload_lag_weeks_last_2_years).
+  case_lag_weeks: 8
+  # Sensitivity run: an RDHS office sees its own weekly returns about one week later.
+  rdhs_lag_weeks: 1
+  env_lag_weeks: 1            # rainfall/soil/radar known up to the previous week
+  # Endemic channel used to define surges
+  endemic:
+    window_half_width: 2      # three-week totals starting within +/-2 weeks of the same time of year
+    min_years: 5              # need at least this many earlier years
+    reference_years: null     # null = every earlier year (proposal's primary definition);
+                              # 5 or 10 = only the last 5/10 years (sensitivity run, Section 6)
+    elevated_q: 0.75
+    high_q: 0.90
+
+# Evaluation design
+evaluation:
+  first_eval_year: 2012       # case-only models: rolling-origin evaluation 2012-2024
+  satellite_first_year: 2017  # radar record starts
+  satellite_eval_from: 2019   # needs two years of radar history for anomalies
+  locked_test_from: "2025-01-01"   # NEVER touch while building. Run once at the end.
+  refit_every_weeks: 13       # refit models every quarter inside the backtest
+  tuning_scheme: loso_gap     # leave-one-season-out with a 6-week buffer either side
+  tuning_gap_weeks: 6
+  bootstrap_reps: 1000
+
+# ---------------------------------------------------------------------
+# Satellite flood rule (frozen in the proposal, Section 5.2)
+# ---------------------------------------------------------------------
+flood_rule:
+  version: "LFR v1.0"
+  z_threshold: -1.5
+  vv_threshold_db: -16.0
+  sd_floor: 0.5
+  min_ref_obs: 3
+  max_slope_deg: 5
+  permanent_water_occurrence: 50
+  speckle_radius_m: 30
+
+# ---------------------------------------------------------------------
+# Alert policy (ordered rules; thresholds are tuned on the backtest and frozen)
+# ---------------------------------------------------------------------
+alerts:
+  watch_target_recall: 0.90
+  advisory_beta: 2.0          # F2: recall counts twice as much as precision
+  advisory_min_lift: 1.2      # ...but Advisory precision must beat the base rate by 20%
+  warning_target_precision: 0.60
+  # Input-age rules for the live system (days)
+  max_age_days:
+    cases: 63                 # 9 weeks: the WER publication lag observed in 2026
+    rain: 10
+    soil: 14
+    radar: 16
+  post_flood_ratio: 2.0       # detector D: paddy wetness at least 2x the usual level
+  post_flood_lookback_weeks: 2
+
+# ---------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------
+models:
+  random_seed: 42
+  quantiles: [0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975]
+  interval_level: 0.80
+  calibration_years: 3        # stack/calibrate on the last N years only (surge rates drift over time); null = all
+  aci_gamma: 0.01
+  lgbm_quantile_heads: [0.1, 0.5, 0.9]   # direct quantile heads; other levels from the count head
+  lgbm:
+    n_estimators: 2000
+    early_stopping_rounds: 100
+    learning_rate: 0.05
+    num_leaves: 15
+    min_child_samples: 40
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 1.0
+    max_depth: -1
+  nb:
+    ridge: 1.0
+    lag_weeks: 12
+    lag_df: 4
+  tuning:
+    n_trials: 40
+    timeout_minutes: 30
+
+# ---------------------------------------------------------------------
+# Notifications (fill secrets as environment variables, never here)
+# ---------------------------------------------------------------------
+notify:
+  telegram_chat_ids: []       # e.g. ["123456789"]; bot token in env LW_TELEGRAM_TOKEN
+  email_to: []                # SMTP settings in env LW_SMTP_HOST/USER/PASS

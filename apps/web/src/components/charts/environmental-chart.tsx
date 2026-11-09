@@ -64,21 +64,38 @@ export function EnvironmentalChart({
     return <div style={{ height }} className="w-full animate-pulse bg-surface-raised rounded" />;
   }
 
+  // Determine mode: dual, rainfall-only, soil-only
+  const hasRain = rainfallSeries.length > 0;
+  const hasSoil = soilMoistureSeries.length > 0;
+
   // Create lookup map of soil moisture by week_start
   const soilMap = new Map<string, number>();
   for (const s of soilMoistureSeries) {
     soilMap.set(s.week_start, s.volumetric_fraction);
   }
 
-  const data = rainfallSeries.map((r, idx) => {
-    const soilVal = soilMap.get(r.week_start);
-    return {
+  let data: { week: string; date: string; rainfall: number | null; soilMoisture: number | null }[];
+
+  if (hasRain) {
+    // Build from rainfall series (may also include soil if dual mode)
+    data = rainfallSeries.map((r, idx) => {
+      const soilVal = soilMap.get(r.week_start);
+      return {
+        week: `W${idx + 1}`,
+        date: r.week_start,
+        rainfall: +r.rainfall_mm.toFixed(1),
+        soilMoisture: soilVal !== undefined ? +(soilVal * 100).toFixed(1) : null,
+      };
+    });
+  } else {
+    // Soil-only mode: build from soil series
+    data = soilMoistureSeries.map((s, idx) => ({
       week: `W${idx + 1}`,
-      date: r.week_start,
-      rainfall: +r.rainfall_mm.toFixed(1),
-      soilMoisture: soilVal !== undefined ? +(soilVal * 100).toFixed(1) : null,
-    };
-  });
+      date: s.week_start,
+      rainfall: null,
+      soilMoisture: +(s.volumetric_fraction * 100).toFixed(1),
+    }));
+  }
 
   return (
     <div className="w-full" style={{ height }}>
@@ -92,23 +109,27 @@ export function EnvironmentalChart({
             tickLine={false}
             interval={3}
           />
+          {/* Left axis: rainfall (or soil if rainfall-only-off) */}
           <YAxis
             yAxisId="left"
-            stroke="#00C8E8"
+            stroke={hasRain ? "#00C8E8" : "#10B981"}
             tick={{ fill: "#94A3B8", fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            unit=" mm"
+            unit={hasRain ? " mm" : " %"}
           />
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            stroke="#10B981"
-            tick={{ fill: "#94A3B8", fontSize: 10 }}
-            tickLine={false}
-            axisLine={false}
-            unit=" %"
-          />
+          {/* Right axis only needed in dual mode */}
+          {hasRain && hasSoil && (
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              stroke="#10B981"
+              tick={{ fill: "#94A3B8", fontSize: 10 }}
+              tickLine={false}
+              axisLine={false}
+              unit=" %"
+            />
+          )}
           <Tooltip content={<CustomEnvTooltip />} />
           <Legend
             verticalAlign="top"
@@ -118,26 +139,30 @@ export function EnvironmentalChart({
           />
 
           {/* Rainfall bars */}
-          <Bar
-            yAxisId="left"
-            dataKey="rainfall"
-            name="CHIRPS Rainfall"
-            fill="#00C8E8"
-            opacity={0.7}
-            radius={[2, 2, 0, 0]}
-          />
+          {hasRain && (
+            <Bar
+              yAxisId="left"
+              dataKey="rainfall"
+              name="CHIRPS Rainfall"
+              fill="#00C8E8"
+              opacity={0.7}
+              radius={[2, 2, 0, 0]}
+            />
+          )}
 
           {/* Soil moisture line */}
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey="soilMoisture"
-            name="ERA5 Soil Moisture"
-            stroke="#10B981"
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, fill: "#10B981" }}
-          />
+          {hasSoil && (
+            <Line
+              yAxisId={hasRain && hasSoil ? "right" : "left"}
+              type="monotone"
+              dataKey="soilMoisture"
+              name="ERA5 Soil Moisture"
+              stroke="#10B981"
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, fill: "#10B981" }}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>

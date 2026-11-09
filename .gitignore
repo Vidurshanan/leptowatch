@@ -137,3 +137,24 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Private development and audit reports
+/audit_output/
+
+# External-source PDF fixtures: review redistribution rights before publishing
+/packages/leptowatch/tests/fixtures/*.pdf
+
+# Development backups
+*.backup
+*.backup_*
+*.calendar_backup
+*.pre_shrinkage
+
+# Additional generated files
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Generated Python package metadata
+**/*.egg-info/

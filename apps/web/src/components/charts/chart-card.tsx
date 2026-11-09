@@ -11,6 +11,7 @@ interface ChartCardProps {
   action?: React.ReactNode;
   footnote?: string;
   isLoading?: boolean;
+  loadingMessage?: string;
   error?: string | null;
   isEmpty?: boolean;
   emptyMessage?: string;
@@ -25,9 +26,10 @@ export function ChartCard({
   action,
   footnote,
   isLoading,
+  loadingMessage = "Loading data…",
   error,
   isEmpty,
-  emptyMessage = "No surveillance records available for this chart.",
+  emptyMessage = "No records available for this chart.",
   children,
   className,
 }: ChartCardProps) {
@@ -56,7 +58,7 @@ export function ChartCard({
           {isLoading ? (
             <div className="flex flex-col items-center justify-center space-y-2 py-12 text-muted-foreground">
               <div className="size-6 animate-spin rounded-full border-2 border-cyan border-t-transparent" />
-              <p className="text-xs">Loading surveillance telemetry...</p>
+              <p className="text-xs">{loadingMessage}</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center space-y-2 py-12 text-rose-400">

@@ -29,6 +29,7 @@ import {
   PredictionBandChart,
   RDHSComparisonChart,
 } from "@/components/charts";
+import { ForecastSimulator } from "@/components/simulator/forecast-simulator";
 import {
   fetchForecastsLatest,
   ForecastListResponse,
@@ -209,6 +210,12 @@ export default function ForecastingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Interactive Forecast Simulator Section */}
+      <ForecastSimulator
+        initialRDHS={selectedRDHS}
+        onSelectRDHS={(rdhs) => setSelectedRDHS(rdhs)}
+      />
 
       {/* Main Charts Row: Forecast Fan Chart + National Comparison */}
       <div className="grid gap-6 lg:grid-cols-12">

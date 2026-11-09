@@ -102,6 +102,13 @@ class Settings:
             / "website_demo_package_v1"
             / "historical_oof_for_website.csv"
         )
+        self.bundle_path = (
+            self.leptowatch_root
+            / "data"
+            / "staging"
+            / "model_readiness"
+            / "leptowatch_bundle_experimental_staging.pkl"
+        )
 
 
 settings = Settings()

@@ -16,6 +16,44 @@ class SoilMoistureSeriesItem(BaseModel):
     volumetric_fraction: float
 
 
+class EnvironmentSourceStatus(BaseModel):
+    """Freshness status for a single environmental data source."""
+    latest_date: Optional[str] = None
+    freshness_status: str  # FRESH | DELAYED | STALE | UNAVAILABLE
+    source: str
+    coverage_rdhs: int = 0        # RDHS areas with valid observations
+    total_rdhs: int = 26          # Total RDHS areas monitored by LeptoWatch
+    districts_in_csv: int = 0     # Raw CSV district row count (may differ from RDHS count)
+    data_vintage: str = "2023 historical"
+
+
+class EnvironmentOverviewResponse(BaseModel):
+    """National-level environmental data overview (freshness and coverage)."""
+    rainfall: EnvironmentSourceStatus
+    soil_moisture: EnvironmentSourceStatus
+    flood: EnvironmentSourceStatus
+    as_of: str
+
+
+class RDHSEnvironmentSummaryItem(BaseModel):
+    """Per-RDHS environmental summary for map layer / comparison view."""
+    rdhs: str
+    district: str
+    latest_rainfall_mm: Optional[float] = None
+    latest_soil_moisture: Optional[float] = None
+    total_rainfall_2023_mm: Optional[float] = None
+    mean_soil_moisture_2023: Optional[float] = None
+    has_rain_data: bool = False
+    has_soil_data: bool = False
+
+
+class EnvironmentSummaryResponse(BaseModel):
+    """National environmental summary across all RDHS areas."""
+    rdhs_count: int
+    data_vintage: str = "2023 historical"
+    items: List[RDHSEnvironmentSummaryItem]
+
+
 class EnvironmentDetailResponse(BaseModel):
     """Environmental intelligence profile for an RDHS area."""
     rdhs: str

@@ -1,6 +1,6 @@
 """Health check schema."""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -16,4 +16,12 @@ class HealthResponse(BaseModel):
     loading_errors: List[str] = Field(default_factory=list, description="Explicit record of dataset loading errors")
     data_sources: Dict[str, Any] = Field(..., description="Availability status of registered staging files")
     freshness_policy_days: int = Field(default=56)
+    model_bundle: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Model bundle file existence and in-memory cache status",
+    )
+    historical_oof: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Historical out-of-fold benchmark dataset availability",
+    )
 

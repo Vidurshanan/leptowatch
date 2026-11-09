@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 from fastapi import HTTPException
 
+from app.config import settings
 from app.schemas.common import PredictionInterval, QuantileForecast, FreshnessInfo, CaseStatus
 from app.schemas.health import HealthResponse
 from app.schemas.summary import DashboardSummaryResponse
@@ -17,7 +18,15 @@ from app.schemas.forecast import (
     HistoricalValidationResponse,
 )
 from app.schemas.alert import AlertRecord, AlertListResponse
-from app.schemas.environment import EnvironmentDetailResponse, RainfallSeriesItem, SoilMoistureSeriesItem
+from app.schemas.environment import (
+    EnvironmentDetailResponse,
+    EnvironmentOverviewResponse,
+    EnvironmentSourceStatus,
+    EnvironmentSummaryResponse,
+    RDHSEnvironmentSummaryItem,
+    RainfallSeriesItem,
+    SoilMoistureSeriesItem,
+)
 from app.schemas.history import HistoryRecord, HistoryResponse, HistorySummary
 from app.schemas.model import ModelMetric, ModelPerformanceResponse
 from app.schemas.data_quality import DataQualityResponse, DataQualitySummary, RDHSQualityItem
@@ -66,6 +75,43 @@ class StagingService:
         except Exception:
             pass
 
+        # Historical OOF Benchmark check
+        has_oof = False
+        oof_rows = 0
+        oof_accessible = False
+        try:
+            oof_accessible = settings.historical_oof_path.exists()
+            oof_df = data_loader.historical_oof
+            if oof_df is not None and not oof_df.empty:
+                has_oof = True
+                oof_rows = len(oof_df)
+        except Exception:
+            pass
+
+        # Model Bundle availability & memory cache check
+        bundle_exists = False
+        bundle_loaded = False
+        try:
+            from app.services.simulator_service import simulator_service
+            bundle_status = simulator_service.get_bundle_status()
+            bundle_exists = bundle_status.get("file_exists", False)
+            bundle_loaded = bundle_status.get("loaded_in_memory", False)
+        except Exception:
+            pass
+
+        model_bundle_info = {
+            "available": bundle_exists,
+            "file_exists": bundle_exists,
+            "loaded_in_memory": bundle_loaded,
+        }
+
+        historical_oof_info = {
+            "available": oof_accessible,
+            "accessible": oof_accessible,
+            "loaded_in_memory": has_oof,
+            "rows": oof_rows,
+        }
+
         data_sources = {
             "demonstration_manifest": {
                 "available": bool(data_loader.manifest),
@@ -94,6 +140,8 @@ class StagingService:
             "flood_series_csv": {
                 "available": data_loader.flood is not None,
             },
+            "historical_oof": historical_oof_info,
+            "model_bundle": model_bundle_info,
         }
 
         readiness = data_loader.get_readiness_status()
@@ -109,6 +157,8 @@ class StagingService:
             loading_errors=list(data_loader.loading_errors),
             data_sources=data_sources,
             freshness_policy_days=56,
+            model_bundle=model_bundle_info,
+            historical_oof=historical_oof_info,
         )
 
     def get_summary(self) -> DashboardSummaryResponse:
@@ -561,6 +611,157 @@ class StagingService:
             rainfall_series_2023=rain_series,
             soil_moisture_series_2023=soil_series,
             flood_summary=flood_summary,
+        )
+
+    def get_environment_overview(self) -> EnvironmentOverviewResponse:
+        """National-level freshness overview for all environmental data sources.
+
+        Coverage is reported as RDHS areas (out of 26), not raw CSV district rows.
+        Kalmunai is counted separately via its Ampara district proxy.
+        Sources are verified independently — rainfall and soil moisture may differ.
+        """
+        import datetime
+
+        ref_date = datetime.date(2023, 12, 31)  # vintage end for 2023 data
+
+        def _freshness_status(latest_date_str: Optional[str]) -> str:
+            if latest_date_str is None:
+                return "UNAVAILABLE"
+            # Data is 2023 vintage — it is stale relative to the current date
+            return "STALE"
+
+        def _last_week_col_to_date(df: pd.DataFrame) -> Optional[str]:
+            week_cols = sorted([c for c in df.columns if c.startswith("w_2023")])
+            if not week_cols:
+                return None
+            last_col = week_cols[-1]
+            date_part = last_col.replace("w_", "")
+            return f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:]}"
+
+        # Build lookup: casefold-district -> has_valid_data (at least one non-null week)
+        def _build_has_data_set(df: Optional[pd.DataFrame]) -> set:
+            """Return set of casefold district names that have ≥1 non-null week value."""
+            result: set = set()
+            if df is None:
+                return result
+            week_cols = sorted([c for c in df.columns if c.startswith("w_2023")])
+            for _, row in df.iterrows():
+                vals = [sanitize_float(row[wc]) for wc in week_cols if sanitize_float(row[wc]) is not None]
+                if vals:
+                    result.add(str(row["ADM2_NAME"]).casefold())
+            return result
+
+        rain_has_data = _build_has_data_set(data_loader.rain_2023)
+        soil_has_data = _build_has_data_set(data_loader.soil_2023)
+
+        # Count RDHS areas (out of 26) with valid data, using RDHS_DISTRICT_MAP
+        # Kalmunai counts separately via Ampara proxy if Ampara has data
+        rain_rdhs_count = sum(
+            1 for rdhs, district in RDHS_DISTRICT_MAP.items()
+            if district.casefold() in rain_has_data
+        )
+        soil_rdhs_count = sum(
+            1 for rdhs, district in RDHS_DISTRICT_MAP.items()
+            if district.casefold() in soil_has_data
+        )
+
+        rain_districts_in_csv = len(data_loader.rain_2023) if data_loader.rain_2023 is not None else 0
+        soil_districts_in_csv = len(data_loader.soil_2023) if data_loader.soil_2023 is not None else 0
+
+        rain_latest = _last_week_col_to_date(data_loader.rain_2023) if data_loader.rain_2023 is not None else None
+        soil_latest = _last_week_col_to_date(data_loader.soil_2023) if data_loader.soil_2023 is not None else None
+
+        # Flood
+        flood_latest: Optional[str] = None
+        if data_loader.flood is not None:
+            fl_df = data_loader.flood
+            if "date" in fl_df.columns and not fl_df.empty:
+                try:
+                    flood_latest = str(fl_df["date"].max())[:10]
+                except Exception:
+                    pass
+
+        as_of = str(ref_date)
+
+        return EnvironmentOverviewResponse(
+            rainfall=EnvironmentSourceStatus(
+                latest_date=rain_latest,
+                freshness_status=_freshness_status(rain_latest),
+                source="UCSB-CHG/CHIRPS/DAILY (satellite infrared + station calibration)",
+                coverage_rdhs=rain_rdhs_count,
+                total_rdhs=26,
+                districts_in_csv=rain_districts_in_csv,
+                data_vintage="2023 historical (Jan–Dec 2023)",
+            ),
+            soil_moisture=EnvironmentSourceStatus(
+                latest_date=soil_latest,
+                freshness_status=_freshness_status(soil_latest),
+                source="ECMWF/ERA5_LAND/DAILY_AGGR (climate reanalysis)",
+                coverage_rdhs=soil_rdhs_count,
+                total_rdhs=26,
+                districts_in_csv=soil_districts_in_csv,
+                data_vintage="2023 historical (Jan–Dec 2023)",
+            ),
+            flood=EnvironmentSourceStatus(
+                latest_date=flood_latest,
+                freshness_status=_freshness_status(flood_latest),
+                source="Sentinel-1 SAR flood proxy (LFR v1.0)",
+                coverage_rdhs=0,
+                data_vintage="Pilot series (staging)",
+            ),
+            as_of=as_of,
+        )
+
+    def get_environment_summary(self) -> EnvironmentSummaryResponse:
+        """Per-RDHS environmental summary: total rainfall, mean soil moisture for map/comparison."""
+        from app.services.data_loader import RDHS_DISTRICT_MAP
+
+        items: List[RDHSEnvironmentSummaryItem] = []
+
+        # Build lookup: district → (total_rainfall, latest_rainfall, mean_soil, latest_soil)
+        rain_lookup: Dict[str, Dict] = {}
+        if data_loader.rain_2023 is not None:
+            r_df = data_loader.rain_2023
+            week_cols = sorted([c for c in r_df.columns if c.startswith("w_2023")])
+            for _, row_r in r_df.iterrows():
+                dist = str(row_r["ADM2_NAME"])
+                vals = [sanitize_float(row_r[wc]) for wc in week_cols if sanitize_float(row_r[wc]) is not None]
+                rain_lookup[dist.casefold()] = {
+                    "total": round(sum(vals), 1) if vals else None,
+                    "latest": round(vals[-1], 1) if vals else None,
+                }
+
+        soil_lookup: Dict[str, Dict] = {}
+        if data_loader.soil_2023 is not None:
+            s_df = data_loader.soil_2023
+            week_cols = sorted([c for c in s_df.columns if c.startswith("w_2023")])
+            for _, row_s in s_df.iterrows():
+                dist = str(row_s["ADM2_NAME"])
+                vals = [sanitize_float(row_s[wc]) for wc in week_cols if sanitize_float(row_s[wc]) is not None]
+                soil_lookup[dist.casefold()] = {
+                    "mean": round(sum(vals) / len(vals), 4) if vals else None,
+                    "latest": round(vals[-1], 4) if vals else None,
+                }
+
+        for rdhs_name, district in RDHS_DISTRICT_MAP.items():
+            dist_key = district.casefold()
+            rain_info = rain_lookup.get(dist_key, {})
+            soil_info = soil_lookup.get(dist_key, {})
+            items.append(RDHSEnvironmentSummaryItem(
+                rdhs=rdhs_name,
+                district=district,
+                latest_rainfall_mm=rain_info.get("latest"),
+                latest_soil_moisture=soil_info.get("latest"),
+                total_rainfall_2023_mm=rain_info.get("total"),
+                mean_soil_moisture_2023=soil_info.get("mean"),
+                has_rain_data=bool(rain_info.get("total") is not None),
+                has_soil_data=bool(soil_info.get("mean") is not None),
+            ))
+
+        return EnvironmentSummaryResponse(
+            rdhs_count=len(items),
+            data_vintage="2023 historical (Jan–Dec 2023)",
+            items=items,
         )
 
     def get_history(
